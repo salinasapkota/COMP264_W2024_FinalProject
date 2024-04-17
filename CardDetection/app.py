@@ -2,7 +2,7 @@ from chalice import Chalice
 from chalicelib import storage_service
 from chalicelib import recognition_service
 from chalicelib import translation_service
-from chalicelib import speech_service
+
 from chalicelib import comprehend_service
 
 import base64
@@ -15,7 +15,7 @@ app.debug = True
 #####
 # services initialization
 #####
-storage_location = 'contentcen301278498.aws.ai'
+storage_location = 'contentcen301175785.aws.ai'
 storage_service = storage_service.StorageService(storage_location)
 recognition_service = recognition_service.RecognitionService(storage_service)
 translation_service = translation_service.TranslationService()
@@ -96,13 +96,7 @@ def translate_image_text(image_id):
     return translated_lines
 
 
-# this function will pass the transalted text to speech_service.py file and receivce the JSON data.
-@app.route('/images/translate-text/speech', methods = ['POST'], cors = True)
-def generate_speech():
-    request_data = json.loads(app.current_request.raw_body)
-    text = request_data['text']
-    response = speech_service.convert_to_speech(text)
-    return response
+
 
 
 @app.route('/images/{image_id}/analyze-entities', methods=['POST'], cors=True)
@@ -114,3 +108,45 @@ def analyze_entities(image_id):
     # Analyze entities using Comprehend
     entities = comprehend_service.detect_entities(text)
     return {'entities': entities}
+
+
+####################
+from chalicelib import database
+@app.route('/card/type/{card_type}', methods=['GET'])
+def get_card_type(card_type):
+    return database.get_card_type(card_type)
+
+
+@app.route('/card/details/{card_number}', methods=['GET'])
+def get_card_details(card_number):
+    return database.get_card_details(card_number)
+
+@app.route('/card/details', methods=['POST'])
+def create_card_details():
+    request = app.current_request
+    data = request.json_body
+    card_number = data.get('card_number')
+    
+    cardholder_name = data.get('cardholder_name')
+    expiry_date = data.get('expiry_date')
+    if card_number and cardholder_name and expiry_date:
+        database.create_card_details(card_number, cardholder_name, expiry_date)
+        return {'message': 'Card details created successfully'}
+    else:
+        return {'error': 'Card details not provided'}, 400
+
+@app.route('/card/details/{card_number}', methods=['PUT'])
+def update_card_details(card_number):
+    request = app.current_request
+    data = request.json_body
+    updated_details = {
+        'cardholder_name': data.get('cardholder_name'),
+        'expiry_date': data.get('expiry_date')
+    }
+    database.update_card_details(card_number, updated_details)
+    return {'message': 'Card details updated successfully'}
+
+@app.route('/card/details/{card_number}', methods=['DELETE'])
+def delete_card_details(card_number):
+    database.delete_card_details(card_number)
+    return {'message': 'Card details deleted successfully'}
