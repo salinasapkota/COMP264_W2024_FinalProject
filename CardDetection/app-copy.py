@@ -18,27 +18,37 @@ storage_service = storage_service.StorageService(storage_location)
 recognition_service = recognition_service.RecognitionService(storage_service)
 translation_service = translation_service.TranslationService()
 
-# The view function above will return {"hello": "world"}
-# whenever you make an HTTP GET request to '/'.
-#
-# Here are a few more examples:
-#
-# @app.route('/hello/{name}')
-# def hello_name(name):
-#    # '/hello/james' -> {"hello": "james"}
-#    return {'hello': name}
-#
-# @app.route('/users', methods=['POST'])
-# def create_user():
-#     # This is the JSON body the user sent in their POST request.
-#     user_as_json = app.current_request.json_body
-#     # We'll echo the json body back to the user in a 'user' key.
-#     return {'user': user_as_json}
-#
-# See the README documentation for more examples.
-#
 
+"""
+@app.route('/signup', methods=['POST'])
+def signup():
+    request = app.current_request
+    data = request.json_body
+    email = data['email']
+    password = data['password']
+    
+    # Hash the password securely
+    hashed_password = hash_password(password)
+    
+    # Store the email and hashed password in DynamoDB
+    store_user(email, hashed_password)
+    
+    return {'message': 'User signed up successfully'}
 
+@app.route('/login', methods=['POST'])
+def login():
+    request = app.current_request
+    data = request.json_body
+    email = data['email']
+    password = data['password']
+    
+    # Authenticate the user
+    if authenticate_user(email, password):
+        return {'message': 'Login successful'}
+    else:
+        raise BadRequestError('Invalid email or password')
+    
+"""
 app = Chalice(app_name='card-detection')
 ddb = boto3.resource('dynamodb')
 user_table = ddb.Table('userTable')
@@ -152,9 +162,7 @@ def reset_password():
 
         return handle_reset_password(email, new_password)
 
-#####
-# RESTful endpoints
-#####
+#Arya's Endpoints
 @app.route('/images', methods = ['POST'], cors = True)
 def upload_image():
     """processes file upload and saves file to storage service"""
@@ -191,6 +199,10 @@ def translate_image_text(image_id):
 
     return translated_lines
 
+
+
+
+
 @app.route('/images/{image_id}/analyze-entities', methods=['POST'], cors=True)
 def analyze_entities(image_id):
     """Detects entities in the text of the specified image"""
@@ -202,17 +214,83 @@ def analyze_entities(image_id):
     return {'entities': entities}
 
 
-####################
+#Arun's Endpoints(Update, Delete)
 from chalicelib import database
 @app.route('/card/type/{card_type}', methods=['GET'])
 def get_card_type(card_type):
     return database.get_card_type(card_type)
 
 
+@app.route('/card/type', methods=['POST'])
+def create_card_type():
+    request = app.current_request
+    data = request.json_body
+    card_type = data.get('card_type')
+    if card_type:
+        database.create_card_type(card_type)
+        return {'message': 'Card type created successfully'}
+    else:
+        return {'error': 'Card type not provided'}, 400
+
+
+# Constants
+def create_card_details(card_number, cardholder_name, expiry_date):
+    table = ddb.Table(TABLE_NAME_CARD_DETAILS)  # Get the table resource
+    table.put_item(
+        Item={
+            'CardNumber': card_number,
+            'CardholderName': cardholder_name,
+            'ExpiryDate': expiry_date
+        }
+    )
+
+def get_card_details(card_number):
+    response = ddb.get_item(TableName=TABLE_NAME_CARD_DETAILS, Key={'CardNumber': {'S': card_number}})
+    return response.get('Item')
+
+def update_card_details(card_number, updated_details):
+    try:
+        # Check if 'CardholderName' key exists in the updated_details dictionary
+        if 'CardholderName' not in updated_details:
+            raise ValueError("Missing 'CardholderName' key in updated_details dictionary")
+
+        ddb.update_item(
+            TableName=TABLE_NAME_CARD_DETAILS,
+            Key={'CardNumber': {'S': card_number}},
+            UpdateExpression='SET CardholderName = :name, ExpiryDate = :expiry',
+            ExpressionAttributeValues={
+                ':name': {'S': updated_details['CardholderName']},
+                ':expiry': {'S': updated_details.get('ExpiryDate', '')}  # Get expiry date, handle if missing
+            }
+        )
+        return True  # Update successful
+    except ValueError as ve:
+        print(f"ValueError: {ve}")
+        return False  # Update failed
+    except Exception as e:
+        print(f"Error updating card details: {e}")
+        return False  # Update failed
+
+
+def delete_card_details(card_number):
+    ddb.delete_item(TableName=TABLE_NAME_CARD_DETAILS, Key={'CardNumber': {'S': card_number}})
+
+@app.route('/card/details', methods=['POST'])
+def post_card_details():  # Rename the endpoint function to avoid conflict
+    request = app.current_request
+    data = request.json_body
+    card_number = data.get('card_number')
+    cardholder_name = data.get('cardholder_name')
+    expiry_date = data.get('expiry_date')
+    if card_number and cardholder_name and expiry_date:
+        create_card_details(card_number, cardholder_name, expiry_date)  # Call the function directly
+
+
 @app.route('/card/details/{card_number}', methods=['GET'])
 def get_card_details(card_number):
     return database.get_card_details(card_number)
 
+"""
 @app.route('/card/details', methods=['POST'])
 def create_card_details():
     request = app.current_request
@@ -223,25 +301,39 @@ def create_card_details():
     expiry_date = data.get('expiry_date')
     if card_number and cardholder_name and expiry_date:
         database.create_card_details(card_number, cardholder_name, expiry_date)
+
         return {'message': 'Card details created successfully'}
     else:
         return {'error': 'Card details not provided'}, 400
 
+"""
+
+
 @app.route('/card/details/{card_number}', methods=['PUT'])
+
+#def put_card_details(card_number):  # Adjust the endpoint function name accordingly
+
 def update_card_details(card_number):
     request = app.current_request
     data = request.json_body
     updated_details = {
-        'CardholderName': data.get('cardholder_name'),
+        'cardholder_name': data.get('cardholder_name'),
         'expiry_date': data.get('expiry_date')
     }
-    try:
-        database.update_card_details(card_number, updated_details)
-    except Exception as e:
-        print(e)
-        return {'message': 'Card details  not updated successfully'}
-    
+
+    update_card_details(card_number, updated_details)  # Call the function directly
     return {'message': 'Card details updated successfully'}
+
+"""
+@app.route('/card/details/{card_number}', methods=['DELETE'])
+def delete_card_details_endpoint(card_number):  # Adjust the endpoint function name accordingly
+    delete_card_details(card_number)  # Call the function directly
+    return {'message': 'Card details deleted successfully'}
+
+    database.update_card_details(card_number, updated_details)
+    return {'message': 'Card details updated successfully'}
+"""
+
 
 @app.route('/card/details/{card_number}', methods=['DELETE'])
 def delete_card_details(card_number):
