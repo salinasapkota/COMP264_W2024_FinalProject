@@ -1,23 +1,23 @@
+"""
 import boto3
 import hashlib
 
-# Initialize AWS client
 dynamodb = boto3.client('dynamodb')
 
 # DynamoDB table name for storing user credentials
-TABLE_NAME = 'userAuthentication_credentials'
+TABLE_NAME = 'Users'
 
 def user_exists(email):
-    # Check if user exists in DynamoDB
+    # Checks if user exists in DynamoDB
     response = dynamodb.get_item(TableName=TABLE_NAME, Key={'email': {'S': email}})
     return 'Item' in response
 
 def store_user(email, hashed_password):
-    # Store user credentials in DynamoDB
+    # Stores user credentials in DynamoDB
     dynamodb.put_item(TableName=TABLE_NAME, Item={'email': {'S': email}, 'password': {'S': hashed_password}})
 
 def authenticate_user(email, password):
-    # Authenticate user against stored credentials in DynamoDB
+    #Authenticates user as per credentials stored in DynamoDB
     response = dynamodb.get_item(TableName=TABLE_NAME, Key={'email': {'S': email}})
     if 'Item' in response:
         stored_password = response['Item']['password']['S']
@@ -26,7 +26,7 @@ def authenticate_user(email, password):
         return False
 
 def reset_user_password(email, hashed_password):
-    # Reset user's password in DynamoDB
+    # Reset users password in DynamoDB
     dynamodb.update_item(
         TableName=TABLE_NAME,
         Key={'email': {'S': email}},
@@ -35,9 +35,10 @@ def reset_user_password(email, hashed_password):
     )
 
 def hash_password(password):
-    # Hash password using SHA-256
+    # Hash password
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verify_password(password, hashed_password):
     # Verify password by comparing hashed passwords
     return hashed_password == hash_password(password)
+"""
