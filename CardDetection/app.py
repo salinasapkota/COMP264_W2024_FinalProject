@@ -137,14 +137,18 @@ def create_card_details():
 
 @app.route('/card/details/{card_number}', methods=['PUT'])
 def update_card_details(card_number):
-    request = app.current_request
-    data = request.json_body
-    updated_details = {
-        'cardholder_name': data.get('cardholder_name'),
-        'expiry_date': data.get('expiry_date')
-    }
-    database.update_card_details(card_number, updated_details)
-    return {'message': 'Card details updated successfully'}
+    try:
+        request = app.current_request
+        data = request.json_body
+        updated_details = {
+            'CardholderName': data.get('cardholder_name'),
+            'ExpiryDate': data.get('expiry_date')
+        }
+        database.update_card_details(card_number, updated_details)
+        return {'message': 'Card details updated successfully'}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
 
 @app.route('/card/details/{card_number}', methods=['DELETE'])
 def delete_card_details(card_number):
