@@ -26,9 +26,6 @@ def update_card_details(card_number, updated_details):
         # Check if 'CardholderName' key exists in the updated_details dictionary
         if 'CardholderName' not in updated_details:
             raise ValueError("Missing 'CardholderName' key in updated_details dictionary")
-        
-        # Get the expiry date from updated_details, handle if missing
-        expiry_date = updated_details.get('ExpiryDate', '')
 
         dynamodb.update_item(
             TableName=TABLE_NAME_CARD_DETAILS,
@@ -36,17 +33,16 @@ def update_card_details(card_number, updated_details):
             UpdateExpression='SET CardholderName = :name, ExpiryDate = :expiry',
             ExpressionAttributeValues={
                 ':name': {'S': updated_details['CardholderName']},
-                ':expiry': {'S': expiry_date}  # Use the provided expiry date or an empty string if missing
+                ':expiry': {'S': updated_details.get('ExpiryDate', '')}  # Get expiry date, handle if missing
             }
         )
+        return True  # Update successful
     except ValueError as ve:
         print(f"ValueError: {ve}")
-    except KeyError as ke:
-        print(f"KeyError: {ke}")
-    except botocore.exceptions.ClientError as ce:
-        print(f"ClientError: {ce}")
+        return False  # Update failed
     except Exception as e:
         print(f"Error updating card details: {e}")
+        return False  # Update failed
 
 
 def delete_card_details(card_number):
