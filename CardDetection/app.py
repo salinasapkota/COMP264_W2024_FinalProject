@@ -41,11 +41,11 @@ translation_service = translation_service.TranslationService()
 
 app = Chalice(app_name='card-detection')
 ddb = boto3.resource('dynamodb')
-user_table = ddb.Table('userTable')
+user_table = ddb.Table('UserTable')
 TABLE_NAME_CARD_DETAILS = ddb.Table('CardDetails')
 
 #Salina's Endpoints(Registration)
-@app.route('/signup', methods=['POST'])
+@app.route('/signup', methods=['POST'], cors=True)
 def signup():
     request = app.current_request
     data = request.json_body
@@ -70,7 +70,7 @@ def signup():
     except Exception as e:
         return Response(body={'message': str(e)}, status_code=500)
 
-@app.route('/login', methods=['POST'])
+@app.route('/login', methods=['POST'],cors=True)
 def login():
     request = app.current_request
     data = request.json_body
@@ -103,7 +103,7 @@ def handle_reset_password(email, new_password):
     except Exception as e:
         return {'message': str(e)}, 500
 
-@app.route('/forgot-password', methods=['POST'])
+@app.route('/forgot-password', methods=['POST'], cors=True)
 def forgot_password():
     request = app.current_request
     data = request.json_body
@@ -124,7 +124,7 @@ def forgot_password():
     #Redirect user to reset password page
     return Response(status_code=302, headers={'Location': '/reset-password?email=' + email}, body='')
 
-@app.route('/reset-password', methods=['GET', 'POST'])
+@app.route('/reset-password', methods=['GET', 'POST'], cors=True)
 def reset_password():
     request = app.current_request
     query_params = request.query_params
@@ -142,7 +142,7 @@ def reset_password():
     elif app.current_request.method == 'POST':
         # Handle POST request to update password
         data = request.json_body
-        new_password = data.get('new_password')
+        new_password = data.get('newPassword')
 
         if not new_password:
             return Response(body={'message': 'New password is required.'}, status_code=400)
