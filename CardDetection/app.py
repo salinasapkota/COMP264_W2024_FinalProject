@@ -1,14 +1,17 @@
-from chalice import Chalice, Response
+from chalice import Chalice, Response, CORSConfig
 import boto3
 from chalicelib import storage_service
 from chalicelib import recognition_service
 from chalicelib import translation_service
 from chalicelib import comprehend_service
+from datetime import datetime, timedelta
+from jose import jwt
 import base64
 import json
 import os
 app = Chalice(app_name='CardDetection')
 app.debug = True
+
 
 #####
 # services initialization
@@ -17,6 +20,8 @@ storage_location = 'contentcen301232187.aws.ai'
 storage_service = storage_service.StorageService(storage_location)
 recognition_service = recognition_service.RecognitionService(storage_service)
 translation_service = translation_service.TranslationService()
+SECRET_KEY = 'lkjhgfdsa'
+
 
 # The view function above will return {"hello": "world"}
 # whenever you make an HTTP GET request to '/'.
@@ -54,18 +59,22 @@ def signup():
     password = data.get('password')
     first_name = data.get('first_name')
     last_name = data.get('last_name')
+    usertype = data.get('usertype')
 
-    if not email or not password or not first_name or not last_name:
-        return Response(body={'message': 'Please add all the details'}, status_code=400)
+    if not email or not password or not first_name or not last_name or not usertype:
+        return Response(body={'message': 'Please enter all the details.'}, status_code=400)
+
+    if usertype not in ['admin', 'user']:
+        return Response(body={'message': 'Invalid user type. Please select either "admin" or "user".'}, status_code=400)
 
     try:
-        #Check if user already exists
+        #Checks if user already exists
         user_item = user_table.get_item(Key={'email': email}).get('Item')
         if user_item:
             return Response(body={'message': 'User already exists.'}, status_code=400)
 
-        #Create new user
-        user_table.put_item(Item={'email': email, 'password': password, 'first_name': first_name, 'last_name': last_name})
+        #Creates new user
+        user_table.put_item(Item={'email': email, 'password': password, 'first_name': first_name, 'last_name': last_name, 'usertype': usertype})
         return Response(body={'message': 'User signed up successfully.'}, status_code=200)
     except Exception as e:
         return Response(body={'message': str(e)}, status_code=500)
@@ -74,7 +83,6 @@ def signup():
 def login():
     request = app.current_request
     data = request.json_body
-
     email = data.get('email')
     password = data.get('password')
 
@@ -82,14 +90,31 @@ def login():
         return Response(body={'message': 'Email and password are required.'}, status_code=400)
 
     try:
-        #Check if user exists and password matches
+        #Checks if user exists and password matches
         user_item = user_table.get_item(Key={'email': email}).get('Item')
         if user_item and user_item['password'] == password:
-            return Response(body={'message': 'Login successful.'}, status_code=200)
+            #Generate JWT token
+            token = jwt.encode({'email': email, 'exp': datetime.utcnow() + timedelta(hours=1)}, SECRET_KEY, algorithm='HS256')
+            return Response(body={'token': token}, status_code=200)
         else:
             return Response(body={'message': 'Invalid email or password.'}, status_code=401)
     except Exception as e:
         return Response(body={'message': str(e)}, status_code=500)
+
+def authenticate(func):
+    def wrapper(*args, **kwargs):
+        token = app.current_request.headers.get('Authorization')
+        if not token:
+            return Response(body={'message': 'Missing token'}, status_code=401)
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            return func(*args, **kwargs)
+        except jwt.ExpiredSignatureError:
+            return Response(body={'message': 'Token has expired'}, status_code=401)
+        except jwt.InvalidTokenError:
+            return Response(body={'message': 'Invalid token'}, status_code=401)
+    return wrapper
+
     
 def handle_reset_password(email, new_password):
     try:
@@ -131,26 +156,33 @@ def reset_password():
     email = query_params.get('email')
 
     if app.current_request.method == 'GET':
-        # Handle GET request to display password reset page
+        #Handle GET request to display password reset page
         if not email:
             return Response(body={'message': 'Email is required.'}, status_code=400)
 
-        # Render the password reset page
-        # You can return an HTML page with a form for resetting the password
         return Response(body={'message': 'Please enter your new password.'}, status_code=200)
 
     elif app.current_request.method == 'POST':
-        # Handle POST request to update password
+        #Handle POST request to update password
         data = request.json_body
         new_password = data.get('new_password')
+        input_email = data.get('email')#gets email from the reset password form
 
         if not new_password:
             return Response(body={'message': 'New password is required.'}, status_code=400)
 
-        if not email:
+        if not input_email:
             return Response(body={'message': 'Email is required.'}, status_code=400)
 
+        if input_email != email:  #Checks if the emails matches
+            return Response(body={'message': 'Invalid email.'}, status_code=400)
+
+        #Continues with updating the password only if the emails match
         return handle_reset_password(email, new_password)
+    
+@app.route('/logout', methods=['POST'])
+def logout():
+    return Response(body={'message': 'Logged out successfully.'}, status_code=200)
 
 #####
 # RESTful endpoints
