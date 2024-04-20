@@ -1,5 +1,3 @@
-
-
 import boto3
 
 
@@ -28,3 +26,4 @@ class RecognitionService:
                 })
 
         return lines
+
