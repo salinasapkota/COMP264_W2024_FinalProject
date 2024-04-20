@@ -26,3 +26,4 @@ class RecognitionService:
                 })
 
         return lines
+
