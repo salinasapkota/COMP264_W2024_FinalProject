@@ -1,12 +1,14 @@
 from chalice import Chalice, Response
-import boto3
+from chalice import Chalice
 from chalicelib import storage_service
 from chalicelib import recognition_service
 from chalicelib import translation_service
+from chalicelib import dynamodb_service
 from chalicelib import comprehend_service
+import uuid
+
 import base64
 import json
-import os
 app = Chalice(app_name='CardDetection')
 app.debug = True
 
@@ -17,27 +19,8 @@ storage_location = 'contentcen301232187.aws.ai'
 storage_service = storage_service.StorageService(storage_location)
 recognition_service = recognition_service.RecognitionService(storage_service)
 translation_service = translation_service.TranslationService()
-
-# The view function above will return {"hello": "world"}
-# whenever you make an HTTP GET request to '/'.
-#
-# Here are a few more examples:
-#
-# @app.route('/hello/{name}')
-# def hello_name(name):
-#    # '/hello/james' -> {"hello": "james"}
-#    return {'hello': name}
-#
-# @app.route('/users', methods=['POST'])
-# def create_user():
-#     # This is the JSON body the user sent in their POST request.
-#     user_as_json = app.current_request.json_body
-#     # We'll echo the json body back to the user in a 'user' key.
-#     return {'user': user_as_json}
-#
-# See the README documentation for more examples.
-#
-
+comprehend_service = comprehend_service.ComprehendService()
+dynamodb_service = dynamodb_service.DynamoService()
 
 app = Chalice(app_name='card-detection')
 ddb = boto3.resource('dynamodb')
@@ -167,6 +150,7 @@ def upload_image():
     return image_info
 
 
+
 @app.route('/images/{image_id}/translate-text', methods = ['POST'], cors = True)
 def translate_image_text(image_id):
     """detects then translates text in the specified image"""
@@ -183,6 +167,7 @@ def translate_image_text(image_id):
         # check confidence
         if float(line['confidence']) >= MIN_CONFIDENCE:
             translated_line = translation_service.translate_text(line['text'], from_lang, to_lang)
+
             translated_lines.append({
                 'text': line['text'],
                 'translation': translated_line,
@@ -247,3 +232,56 @@ def update_card_details(card_number):
 def delete_card_details(card_number):
     database.delete_card_details(card_number)
     return {'message': 'Card details deleted successfully'}
+
+
+########Ariya############
+
+@app.route('/text/comprehend', methods=['POST'], cors=True)
+def comprehend_text():
+    """Comprehends what is each element in the given translations"""
+    # try:
+    request_data = json.loads(app.current_request.raw_body)
+    joined_text = ' '.join([line['translation']['translatedText'] for line in request_data])
+
+    name_position = joined_text.find("NOM") + 3
+    joined_text = joined_text[name_position:]
+    print("#############################Ariya:",joined_text)
+
+   
+    
+    print(joined_text) #DEBUG
+    tags = comprehend_service.detect_medical_entities(joined_text)
+    print("---------------------------------------------------------")
+    print(tags)
+
+    return tags
+
+
+# app.py
+
+# Assuming DynamoService is imported and configured properly
+
+
+
+
+@app.route('/users', methods=['POST'], cors=True)
+def create_user():
+    try:
+        # Parse the request body
+        request_data = json.loads(app.current_request.raw_body)
+
+        # Generate a unique user ID
+        user_id = str(uuid.uuid4())
+        name = request_data.get('name')
+        
+        if not name:  # Check if the name is provided
+            return Response(body={'message': 'Name is required'}, status_code=400)
+
+        # Call DynamoService to create a new user entry
+        response = dynamodb_service.create_user(user_id, request_data)
+
+        # Return a success response with the new user_id
+        return {'message': 'User created successfully', 'userId': user_id}
+
+    except Exception as e:
+        return Response(body={'message': str(e)}, status_code=400)
