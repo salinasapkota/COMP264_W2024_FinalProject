@@ -1,14 +1,19 @@
-from chalice import Chalice, Response
+from chalice import Chalice, Response, CORSConfig
 import boto3
 from chalicelib import storage_service
 from chalicelib import recognition_service
 from chalicelib import translation_service
+from chalicelib import dynamodb_service
 from chalicelib import comprehend_service
+import uuid
+
+from datetime import datetime, timedelta
+from jose import jwt
 import base64
 import json
-import os
 app = Chalice(app_name='CardDetection')
 app.debug = True
+
 
 #####
 # services initialization
@@ -17,6 +22,11 @@ storage_location = 'contentcen301232187.aws.ai'
 storage_service = storage_service.StorageService(storage_location)
 recognition_service = recognition_service.RecognitionService(storage_service)
 translation_service = translation_service.TranslationService()
+
+comprehend_service = comprehend_service.ComprehendService()
+dynamodb_service = dynamodb_service.DynamoService()
+SECRET_KEY = 'lkjhgfdsa'
+
 
 # The view function above will return {"hello": "world"}
 # whenever you make an HTTP GET request to '/'.
@@ -54,18 +64,22 @@ def signup():
     password = data.get('password')
     first_name = data.get('first_name')
     last_name = data.get('last_name')
+    usertype = data.get('usertype')
 
-    if not email or not password or not first_name or not last_name:
-        return Response(body={'message': 'Please add all the details'}, status_code=400)
+    if not email or not password or not first_name or not last_name or not usertype:
+        return Response(body={'message': 'Please enter all the details.'}, status_code=400)
+
+    if usertype not in ['admin', 'user']:
+        return Response(body={'message': 'Invalid user type. Please select either "admin" or "user".'}, status_code=400)
 
     try:
-        #Check if user already exists
+        #Checks if user already exists
         user_item = user_table.get_item(Key={'email': email}).get('Item')
         if user_item:
             return Response(body={'message': 'User already exists.'}, status_code=400)
 
-        #Create new user
-        user_table.put_item(Item={'email': email, 'password': password, 'first_name': first_name, 'last_name': last_name})
+        #Creates new user
+        user_table.put_item(Item={'email': email, 'password': password, 'first_name': first_name, 'last_name': last_name, 'usertype': usertype})
         return Response(body={'message': 'User signed up successfully.'}, status_code=200)
     except Exception as e:
         return Response(body={'message': str(e)}, status_code=500)
@@ -74,7 +88,6 @@ def signup():
 def login():
     request = app.current_request
     data = request.json_body
-
     email = data.get('email')
     password = data.get('password')
 
@@ -82,14 +95,31 @@ def login():
         return Response(body={'message': 'Email and password are required.'}, status_code=400)
 
     try:
-        #Check if user exists and password matches
+        #Checks if user exists and password matches
         user_item = user_table.get_item(Key={'email': email}).get('Item')
         if user_item and user_item['password'] == password:
-            return Response(body={'message': 'Login successful.'}, status_code=200)
+            #Generate JWT token
+            token = jwt.encode({'email': email, 'exp': datetime.utcnow() + timedelta(hours=1)}, SECRET_KEY, algorithm='HS256')
+            return Response(body={'token': token}, status_code=200)
         else:
             return Response(body={'message': 'Invalid email or password.'}, status_code=401)
     except Exception as e:
         return Response(body={'message': str(e)}, status_code=500)
+
+def authenticate(func):
+    def wrapper(*args, **kwargs):
+        token = app.current_request.headers.get('Authorization')
+        if not token:
+            return Response(body={'message': 'Missing token'}, status_code=401)
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+            return func(*args, **kwargs)
+        except jwt.ExpiredSignatureError:
+            return Response(body={'message': 'Token has expired'}, status_code=401)
+        except jwt.InvalidTokenError:
+            return Response(body={'message': 'Invalid token'}, status_code=401)
+    return wrapper
+
     
 def handle_reset_password(email, new_password):
     try:
@@ -131,26 +161,34 @@ def reset_password():
     email = query_params.get('email')
 
     if app.current_request.method == 'GET':
-        # Handle GET request to display password reset page
+        #Handle GET request to display password reset page
         if not email:
             return Response(body={'message': 'Email is required.'}, status_code=400)
 
-        # Render the password reset page
-        # You can return an HTML page with a form for resetting the password
         return Response(body={'message': 'Please enter your new password.'}, status_code=200)
 
     elif app.current_request.method == 'POST':
-        # Handle POST request to update password
+        #Handle POST request to update password
         data = request.json_body
-        new_password = data.get('newPassword')
+        new_password = data.get('new_password')
+        input_email = data.get('email')#gets email from the reset password form
+
 
         if not new_password:
             return Response(body={'message': 'New password is required.'}, status_code=400)
 
-        if not email:
+        if not input_email:
             return Response(body={'message': 'Email is required.'}, status_code=400)
 
+        if input_email != email:  #Checks if the emails matches
+            return Response(body={'message': 'Invalid email.'}, status_code=400)
+
+        #Continues with updating the password only if the emails match
         return handle_reset_password(email, new_password)
+    
+@app.route('/logout', methods=['POST'])
+def logout():
+    return Response(body={'message': 'Logged out successfully.'}, status_code=200)
 
 #####
 # RESTful endpoints
@@ -165,6 +203,7 @@ def upload_image():
     image_info = storage_service.upload_file(file_bytes, file_name)
 
     return image_info
+
 
 
 @app.route('/images/{image_id}/translate-text', methods = ['POST'], cors = True)
@@ -183,6 +222,7 @@ def translate_image_text(image_id):
         # check confidence
         if float(line['confidence']) >= MIN_CONFIDENCE:
             translated_line = translation_service.translate_text(line['text'], from_lang, to_lang)
+
             translated_lines.append({
                 'text': line['text'],
                 'translation': translated_line,
@@ -229,6 +269,7 @@ def create_card_details():
 
 @app.route('/card/details/{card_number}', methods=['PUT'])
 def update_card_details(card_number):
+version1
     request = app.current_request
     data = request.json_body
     updated_details = {
@@ -242,8 +283,125 @@ def update_card_details(card_number):
         return {'message': 'Card details  not updated successfully'}
     
     return {'message': 'Card details updated successfully'}
+=======
+    try:
+        request = app.current_request
+        data = request.json_body
+        updated_details = {
+            'CardholderName': data.get('cardholder_name'),
+            'ExpiryDate': data.get('expiry_date')
+        }
+        database.update_card_details(card_number, updated_details)
+        return {'message': 'Card details updated successfully'}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+ Arun
 
 @app.route('/card/details/{card_number}', methods=['DELETE'])
 def delete_card_details(card_number):
     database.delete_card_details(card_number)
     return {'message': 'Card details deleted successfully'}
+
+
+########Ariya############
+
+@app.route('/text/comprehend', methods=['POST'], cors=True)
+def comprehend_text():
+    """Comprehends what is each element in the given translations"""
+    # try:
+    request_data = json.loads(app.current_request.raw_body)
+    joined_text = ' '.join([line['translation']['translatedText'] for line in request_data])
+
+    name_position = joined_text.find("NOM") + 3
+    joined_text = joined_text[name_position:]
+    print("#############################Ariya:",joined_text)
+
+   
+    
+    print(joined_text) #DEBUG
+    tags = comprehend_service.detect_medical_entities(joined_text)
+    print("---------------------------------------------------------")
+    print(tags)
+
+    return tags
+
+
+
+# Assuming DynamoService is imported and configured properly
+
+
+
+
+@app.route('/users', methods=['POST'], cors=True)
+def create_user():
+    try:
+        # Parse the request body
+        request_data = json.loads(app.current_request.raw_body)
+
+        # Generate a unique user ID
+        user_id = str(uuid.uuid4())
+        name = request_data.get('name')
+        
+        if not name:  # Check if the name is provided
+            return Response(body={'message': 'Name is required'}, status_code=400)
+
+        # Call DynamoService to create a new user entry
+        response = dynamodb_service.create_user(user_id, request_data)
+
+        # Return a success response with the new user_id
+        return {'message': 'User created successfully', 'userId': user_id}
+
+    except Exception as e:
+        return Response(body={'message': str(e)}, status_code=400)
+
+    
+@app.route('/users/{user_id}', methods=['GET'], cors=True)
+def get_user_details(user_id):
+    try:
+        # Retrieve user details from DynamoDB using the provided user_id
+        user_data = dynamodb_service.get_user(user_id)
+        
+        # Check if user_data has content
+        if user_data and 'Item' in user_data:
+            # Return the user details
+            return user_data['Item']
+        else:
+            # User not found
+            return Response(body={'message': 'User not found'}, status_code=404)
+    
+    except Exception as e:
+        # Log the exception and return a 500 error
+        app.log.error(f"Error retrieving user details: {str(e)}")
+        return Response(body={'message': 'Internal Server Error'}, status_code=500)
+
+@app.route('/users/{user_id}', methods=['PUT'])
+def update_user(user_id):
+    request = app.current_request
+    request_data = request.json_body
+
+    try:
+        response = dynamodb_service.update_user(user_id, request_data)
+        # Check if the update was acknowledged with any returned attributes
+        if 'Attributes' in response:
+            return {'message': 'User details updated successfully'}
+        else:
+            # Log or handle the case where no attributes are returned
+            app.log.info('Update executed but no attributes were returned.')
+            return {'message': 'Update executed, no attributes to return'}, 200
+
+    except Exception as e:
+        # Log the error and return a more generic server error message
+        app.log.error(f'Failed to update user details: {e}')
+        return Response(body={'error': 'Failed to update user details due to an internal error'}, status_code=500)
+
+
+@app.route('/users/{user_id}', methods=['DELETE'])
+def delete_user(user_id):
+    response = dynamodb_service.delete_user(user_id)
+    if 'ResponseMetadata' in response and response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        return {'message': 'User deleted successfully'}
+    else:
+        return {'error': 'Failed to delete user'}, 400
+    
+
