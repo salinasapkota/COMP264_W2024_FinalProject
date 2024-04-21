@@ -10,7 +10,6 @@ class StorageService:
         return self.bucket_name
 
     def upload_file(self, file_bytes, file_name):
-        #file name,base64
         self.client.put_object(Bucket = self.bucket_name,
                                Body = file_bytes,
                                Key = file_name,
@@ -18,4 +17,3 @@ class StorageService:
 
         return {'fileId': file_name,
                 'fileUrl': "http://" + self.bucket_name + ".s3.amazonaws.com/" + file_name}
-

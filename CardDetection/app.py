@@ -3,12 +3,14 @@ import boto3
 from chalicelib import storage_service
 from chalicelib import recognition_service
 from chalicelib import translation_service
+from chalicelib import dynamodb_service
 from chalicelib import comprehend_service
+import uuid
+
 from datetime import datetime, timedelta
 from jose import jwt
 import base64
 import json
-import os
 app = Chalice(app_name='CardDetection')
 app.debug = True
 
@@ -20,6 +22,9 @@ storage_location = 'contentcen301232187.aws.ai'
 storage_service = storage_service.StorageService(storage_location)
 recognition_service = recognition_service.RecognitionService(storage_service)
 translation_service = translation_service.TranslationService()
+
+comprehend_service = comprehend_service.ComprehendService()
+dynamodb_service = dynamodb_service.DynamoService()
 SECRET_KEY = 'lkjhgfdsa'
 
 
@@ -199,6 +204,7 @@ def upload_image():
     return image_info
 
 
+
 @app.route('/images/{image_id}/translate-text', methods = ['POST'], cors = True)
 def translate_image_text(image_id):
     """detects then translates text in the specified image"""
@@ -215,6 +221,7 @@ def translate_image_text(image_id):
         # check confidence
         if float(line['confidence']) >= MIN_CONFIDENCE:
             translated_line = translation_service.translate_text(line['text'], from_lang, to_lang)
+
             translated_lines.append({
                 'text': line['text'],
                 'translation': translated_line,
@@ -261,6 +268,7 @@ def create_card_details():
 
 @app.route('/card/details/{card_number}', methods=['PUT'])
 def update_card_details(card_number):
+version1
     request = app.current_request
     data = request.json_body
     updated_details = {
@@ -274,8 +282,125 @@ def update_card_details(card_number):
         return {'message': 'Card details  not updated successfully'}
     
     return {'message': 'Card details updated successfully'}
+=======
+    try:
+        request = app.current_request
+        data = request.json_body
+        updated_details = {
+            'CardholderName': data.get('cardholder_name'),
+            'ExpiryDate': data.get('expiry_date')
+        }
+        database.update_card_details(card_number, updated_details)
+        return {'message': 'Card details updated successfully'}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+ Arun
 
 @app.route('/card/details/{card_number}', methods=['DELETE'])
 def delete_card_details(card_number):
     database.delete_card_details(card_number)
     return {'message': 'Card details deleted successfully'}
+
+
+########Ariya############
+
+@app.route('/text/comprehend', methods=['POST'], cors=True)
+def comprehend_text():
+    """Comprehends what is each element in the given translations"""
+    # try:
+    request_data = json.loads(app.current_request.raw_body)
+    joined_text = ' '.join([line['translation']['translatedText'] for line in request_data])
+
+    name_position = joined_text.find("NOM") + 3
+    joined_text = joined_text[name_position:]
+    print("#############################Ariya:",joined_text)
+
+   
+    
+    print(joined_text) #DEBUG
+    tags = comprehend_service.detect_medical_entities(joined_text)
+    print("---------------------------------------------------------")
+    print(tags)
+
+    return tags
+
+
+
+# Assuming DynamoService is imported and configured properly
+
+
+
+
+@app.route('/users', methods=['POST'], cors=True)
+def create_user():
+    try:
+        # Parse the request body
+        request_data = json.loads(app.current_request.raw_body)
+
+        # Generate a unique user ID
+        user_id = str(uuid.uuid4())
+        name = request_data.get('name')
+        
+        if not name:  # Check if the name is provided
+            return Response(body={'message': 'Name is required'}, status_code=400)
+
+        # Call DynamoService to create a new user entry
+        response = dynamodb_service.create_user(user_id, request_data)
+
+        # Return a success response with the new user_id
+        return {'message': 'User created successfully', 'userId': user_id}
+
+    except Exception as e:
+        return Response(body={'message': str(e)}, status_code=400)
+
+    
+@app.route('/users/{user_id}', methods=['GET'], cors=True)
+def get_user_details(user_id):
+    try:
+        # Retrieve user details from DynamoDB using the provided user_id
+        user_data = dynamodb_service.get_user(user_id)
+        
+        # Check if user_data has content
+        if user_data and 'Item' in user_data:
+            # Return the user details
+            return user_data['Item']
+        else:
+            # User not found
+            return Response(body={'message': 'User not found'}, status_code=404)
+    
+    except Exception as e:
+        # Log the exception and return a 500 error
+        app.log.error(f"Error retrieving user details: {str(e)}")
+        return Response(body={'message': 'Internal Server Error'}, status_code=500)
+
+@app.route('/users/{user_id}', methods=['PUT'])
+def update_user(user_id):
+    request = app.current_request
+    request_data = request.json_body
+
+    try:
+        response = dynamodb_service.update_user(user_id, request_data)
+        # Check if the update was acknowledged with any returned attributes
+        if 'Attributes' in response:
+            return {'message': 'User details updated successfully'}
+        else:
+            # Log or handle the case where no attributes are returned
+            app.log.info('Update executed but no attributes were returned.')
+            return {'message': 'Update executed, no attributes to return'}, 200
+
+    except Exception as e:
+        # Log the error and return a more generic server error message
+        app.log.error(f'Failed to update user details: {e}')
+        return Response(body={'error': 'Failed to update user details due to an internal error'}, status_code=500)
+
+
+@app.route('/users/{user_id}', methods=['DELETE'])
+def delete_user(user_id):
+    response = dynamodb_service.delete_user(user_id)
+    if 'ResponseMetadata' in response and response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        return {'message': 'User deleted successfully'}
+    else:
+        return {'error': 'Failed to delete user'}, 400
+    
+
