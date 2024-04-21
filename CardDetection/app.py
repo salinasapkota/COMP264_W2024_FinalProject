@@ -257,7 +257,6 @@ def comprehend_text():
     return tags
 
 
-# app.py
 
 # Assuming DynamoService is imported and configured properly
 
@@ -285,3 +284,54 @@ def create_user():
 
     except Exception as e:
         return Response(body={'message': str(e)}, status_code=400)
+
+    
+@app.route('/users/{user_id}', methods=['GET'], cors=True)
+def get_user_details(user_id):
+    try:
+        # Retrieve user details from DynamoDB using the provided user_id
+        user_data = dynamodb_service.get_user(user_id)
+        
+        # Check if user_data has content
+        if user_data and 'Item' in user_data:
+            # Return the user details
+            return user_data['Item']
+        else:
+            # User not found
+            return Response(body={'message': 'User not found'}, status_code=404)
+    
+    except Exception as e:
+        # Log the exception and return a 500 error
+        app.log.error(f"Error retrieving user details: {str(e)}")
+        return Response(body={'message': 'Internal Server Error'}, status_code=500)
+
+@app.route('/users/{user_id}', methods=['PUT'])
+def update_user(user_id):
+    request = app.current_request
+    request_data = request.json_body
+
+    try:
+        response = dynamodb_service.update_user(user_id, request_data)
+        # Check if the update was acknowledged with any returned attributes
+        if 'Attributes' in response:
+            return {'message': 'User details updated successfully'}
+        else:
+            # Log or handle the case where no attributes are returned
+            app.log.info('Update executed but no attributes were returned.')
+            return {'message': 'Update executed, no attributes to return'}, 200
+
+    except Exception as e:
+        # Log the error and return a more generic server error message
+        app.log.error(f'Failed to update user details: {e}')
+        return Response(body={'error': 'Failed to update user details due to an internal error'}, status_code=500)
+
+
+@app.route('/users/{user_id}', methods=['DELETE'])
+def delete_user(user_id):
+    response = dynamodb_service.delete_user(user_id)
+    if 'ResponseMetadata' in response and response['ResponseMetadata']['HTTPStatusCode'] == 200:
+        return {'message': 'User deleted successfully'}
+    else:
+        return {'error': 'Failed to delete user'}, 400
+    
+
